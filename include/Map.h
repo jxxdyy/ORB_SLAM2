@@ -70,9 +70,9 @@ protected:
     std::set<MapPoint*> mspMapPoints;
     std::set<KeyFrame*> mspKeyFrames;
 
-    std::vector<MapPoint*> mvpReferenceMapPoints;
+    std::vector<MapPoint*> mvpReferenceMapPoints;   // 가장 많은 노드들과 연결되어 있는 노드를 레퍼런스로?
 
-    long unsigned int mnMaxKFid;
+    long unsigned int mnMaxKFid;    // 설명 필요
 
     // Index related to a big change in the map (loop closure, global BA)
     int mnBigChangeIdx;

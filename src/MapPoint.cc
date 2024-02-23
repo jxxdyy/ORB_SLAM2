@@ -95,16 +95,26 @@ KeyFrame* MapPoint::GetReferenceKeyFrame()
     return mpRefKF;
 }
 
+
+/**
+ * @brief 설명 필요
+*/
 void MapPoint::AddObservation(KeyFrame* pKF, size_t idx)
 {
     unique_lock<mutex> lock(mMutexFeatures);
-    if(mObservations.count(pKF))
+    
+    // std::map<KeyFrame*,size_t> mObservations -> 나를 보고인는 모든 키프레임의 키포인트를 저장
+    // map.count() : key값에 해당하는 원소(value)의 개수를 반환
+    if(mObservations.count(pKF)) 
         return;
     mObservations[pKF]=idx;
 
+    // std::vector<float> mvuRight : negative value for monocular points
     if(pKF->mvuRight[idx]>=0)
-        nObs+=2;
+        // 스트레오이기 때문에 +2
+        nObs+=2;    // class MapPoint::nObs
     else
+        // 모노큘러일 경우 +1
         nObs++;
 }
 
@@ -239,7 +249,11 @@ float MapPoint::GetFoundRatio()
     return static_cast<float>(mnFound)/mnVisible;
 }
 
-void MapPoint::ComputeDistinctiveDescriptors()
+
+/**
+ * @brief 설명 필요
+*/
+void MapPoint:: ComputeDistinctiveDescriptors()
 {
     // Retrieve all observed descriptors
     vector<cv::Mat> vDescriptors;
@@ -248,21 +262,29 @@ void MapPoint::ComputeDistinctiveDescriptors()
 
     {
         unique_lock<mutex> lock1(mMutexFeatures);
-        if(mbBad)
+        if(mbBad)  // culling?
             return;
+        
+        // class MapPoint::mObservations;
         observations=mObservations;
     }
 
     if(observations.empty())
         return;
 
+    // obseravation의 크기만큼 vDescriptors 공간 할당
     vDescriptors.reserve(observations.size());
 
     for(map<KeyFrame*,size_t>::iterator mit=observations.begin(), mend=observations.end(); mit!=mend; mit++)
     {
-        KeyFrame* pKF = mit->first;
+        // mit->first keyFrame
+        // mit->second idx
+        KeyFrame* pKF = mit->first; 
 
+        // mDescriptors : keyframe에서 해당 keypoint의 descriptor
+        // vDescriptors : 해당 keypoint에 대한 각 keyframe에서의 descriptor
         if(!pKF->isBad())
+            // row에 descriptor 정보 담겨있음
             vDescriptors.push_back(pKF->mDescriptors.row(mit->second));
     }
 
@@ -272,25 +294,37 @@ void MapPoint::ComputeDistinctiveDescriptors()
     // Compute distances between them
     const size_t N = vDescriptors.size();
 
-    float Distances[N][N];
+    float Distances[N][N]; // 두 Decriptor 사이의 distance  
     for(size_t i=0;i<N;i++)
     {
         Distances[i][i]=0;
         for(size_t j=i+1;j<N;j++)
-        {
+        {   
+            // 두 Decriptor 사이의 distance 계산
+            // [Q] float Distances인데 왜 int 변수를 대입?
             int distij = ORBmatcher::DescriptorDistance(vDescriptors[i],vDescriptors[j]);
+
+            // uppertriangle을 구하고 대칭시켜서 N*N을 만드는 원리 
             Distances[i][j]=distij;
             Distances[j][i]=distij;
         }
     }
 
     // Take the descriptor with least median distance to the rest
-    int BestMedian = INT_MAX;
+    int BestMedian = INT_MAX; // 2147483647
     int BestIdx = 0;
     for(size_t i=0;i<N;i++)
-    {
+    {   
+        // [Q] 이렇게 하는게 어떻게 초기화 되는거지?
+        // [A] 해당 keypoint에 대한 i번째 keyframe descriptor와 그 외 keyframe 사이의 distance값을 나타내는 row 배열 
         vector<int> vDists(Distances[i],Distances[i]+N);
         sort(vDists.begin(),vDists.end());
+
+        // vDist를 sort하고 중간값을 구한 다음 그 중 최소가 되는 i번째 descriptor 결정 -> 해당 keypoint를 대표하는 descriptor 결정
+        // [Q] 이거 왜 하는걸까? -> data association에 유리
+        /* [Q] 왜 이렇게 하는걸까?
+            1) 이미지 필터링 관점에서 볼 때 해당 픽셀 주위의 주변의 중간값을 통해 해당 픽셀을 예측하는 원리와 동일
+            2) 가장 작은 중간값을 가진 다는 것은 해당 keyframe의 descriptor와 다른 모든 keyframe의 descriptor의 거리가 전체적으로 가깝다는 것 */                    
         int median = vDists[0.5*(N-1)];
 
         if(median<BestMedian)
@@ -327,8 +361,11 @@ bool MapPoint::IsInKeyFrame(KeyFrame *pKF)
     return (mObservations.count(pKF));
 }
 
+
+// MapPoint culling을 위해서 normal vector를 씀
 void MapPoint::UpdateNormalAndDepth()
 {
+    // MapPoint 관점에서 observation
     map<KeyFrame*,size_t> observations;
     KeyFrame* pRefKF;
     cv::Mat Pos;
@@ -338,31 +375,44 @@ void MapPoint::UpdateNormalAndDepth()
         if(mbBad)
             return;
         observations=mObservations;
-        pRefKF=mpRefKF;
+        pRefKF=mpRefKF; // 얉은 복사
         Pos = mWorldPos.clone();
     }
 
     if(observations.empty())
         return;
 
+    // normal vector
     cv::Mat normal = cv::Mat::zeros(3,1,CV_32F);
     int n=0;
     for(map<KeyFrame*,size_t>::iterator mit=observations.begin(), mend=observations.end(); mit!=mend; mit++)
     {
-        KeyFrame* pKF = mit->first;
-        cv::Mat Owi = pKF->GetCameraCenter();
-        cv::Mat normali = mWorldPos - Owi;
+        KeyFrame* pKF = mit->first;             // keyframe
+        cv::Mat Owi = pKF->GetCameraCenter();   // camera position (camera center)
+
+        // mWorldPos : Position in absolute coordinates
+        cv::Mat normali = mWorldPos - Owi;   
+
+        // 나를 바라보고 있는 observation들의 normal을 구함  
         normal = normal + normali/cv::norm(normali);
         n++;
     }
 
     cv::Mat PC = Pos - pRefKF->GetCameraCenter();
+
+    // ORB extractor 관련 -> stereo 이미지에서 가장 멀리있는 keypoint와 가장 가까운 keypoint를 구함
+    // 실제 거리 계산
     const float dist = cv::norm(PC);
+    // keypoint가 추출된 pyramid layer의
     const int level = pRefKF->mvKeysUn[observations[pRefKF]].octave;
+    // 해당 pyramid layer의 level
     const float levelScaleFactor =  pRefKF->mvScaleFactors[level];
+    // ORB extractor가 가진 level 개수
     const int nLevels = pRefKF->mnScaleLevels;
 
     {
+        // depth를 추정하기 위한 max, min?
+        // [Paper] Track Local Map 3) 부분
         unique_lock<mutex> lock3(mMutexPos);
         mfMaxDistance = dist*levelScaleFactor;
         mfMinDistance = mfMaxDistance/pRefKF->mvScaleFactors[nLevels-1];

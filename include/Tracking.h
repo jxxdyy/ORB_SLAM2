@@ -78,6 +78,8 @@ public:
 public:
 
     // Tracking states
+    // enum -> 자료형을 사용자가 원하는 방법으로 정의 (값을 명시적으로 할당하지 않으면 0부터 차례로 자동으로 할당됨)
+    // 열거형을 정의해도 메모리는 할당되지 않음, 열거된 유형의 변수가 정의된 경우 해당 변수에 메모리 할당
     enum eTrackingState{
         SYSTEM_NOT_READY=-1,
         NO_IMAGES_YET=0,
@@ -86,6 +88,7 @@ public:
         LOST=3
     };
 
+    // 열거형 변수 메모리 할당
     eTrackingState mState;
     eTrackingState mLastProcessedState;
 
@@ -182,9 +185,9 @@ protected:
     Map* mpMap;
 
     //Calibration matrix
-    cv::Mat mK;
-    cv::Mat mDistCoef;
-    float mbf;
+    cv::Mat mK;         // instrinsic
+    cv::Mat mDistCoef;  // distortion coefficient
+    float mbf;          // [Q] what?
 
     //New KeyFrame rules (according to fps)
     int mMinFrames;

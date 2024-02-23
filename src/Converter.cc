@@ -24,11 +24,18 @@
 namespace ORB_SLAM2
 {
 
+
+// mDescriptors -> vDescriptors
 std::vector<cv::Mat> Converter::toDescriptorVector(const cv::Mat &Descriptors)
 {
     std::vector<cv::Mat> vDesc;
+
+    // mDescriptor의 row가 해당 keyframe의 keypoints에 대한 descriptor 정보
+    // 전체 decriptor 개수만큼 reserve
     vDesc.reserve(Descriptors.rows);
+
     for (int j=0;j<Descriptors.rows;j++)
+        // j번째 keyframe의 descriptor를 vDesc에 담음
         vDesc.push_back(Descriptors.row(j));
 
     return vDesc;

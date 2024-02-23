@@ -554,9 +554,14 @@ cv::Mat LocalMapping::ComputeF12(KeyFrame *&pKF1, KeyFrame *&pKF2)
 
 void LocalMapping::RequestStop()
 {
+    // 
     unique_lock<mutex> lock(mMutexStop);
     mbStopRequested = true;
+
+    // New keyframe 생성 관련 critical session 접근 제한
     unique_lock<mutex> lock2(mMutexNewKFs);
+    
+    // BA 중지 flag = true
     mbAbortBA = true;
 }
 
@@ -586,13 +591,18 @@ bool LocalMapping::stopRequested()
 }
 
 void LocalMapping::Release()
-{
+{   
+    // 순서에 따라 dead lock이 발생할 수 있음 (dead lock : 아무것도 할 수 없는 상태)
     unique_lock<mutex> lock(mMutexStop);
     unique_lock<mutex> lock2(mMutexFinish);
     if(mbFinished)
         return;
+
+    
     mbStopped = false;
     mbStopRequested = false;
+
+    // 새로운 keyframe을 위해 기존의 keyframe list를 삭제
     for(list<KeyFrame*>::iterator lit = mlNewKeyFrames.begin(), lend=mlNewKeyFrames.end(); lit!=lend; lit++)
         delete *lit;
     mlNewKeyFrames.clear();

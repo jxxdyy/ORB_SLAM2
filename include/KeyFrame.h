@@ -120,9 +120,9 @@ public:
     // The following variables are accesed from only 1 thread or never change (no mutex needed).
 public:
 
-    static long unsigned int nNextId;
-    long unsigned int mnId;
-    const long unsigned int mnFrameId;
+    static long unsigned int nNextId;   // 변수 설명
+    long unsigned int mnId;             // 
+    const long unsigned int mnFrameId;  //
 
     const double mTimeStamp;
 

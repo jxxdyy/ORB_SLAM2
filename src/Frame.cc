@@ -255,6 +255,8 @@ void Frame::ExtractORB(int flag, const cv::Mat &im)
 void Frame::SetPose(cv::Mat Tcw)
 {
     mTcw = Tcw.clone();
+    
+    // 현재 Tcw에 따른 Rotation, translation 설정
     UpdatePoseMatrices();
 }
 
@@ -324,6 +326,10 @@ bool Frame::isInFrustum(MapPoint *pMP, float viewingCosLimit)
     return true;
 }
 
+
+/**
+ * @brief 
+*/
 vector<size_t> Frame::GetFeaturesInArea(const float &x, const float  &y, const float  &r, const int minLevel, const int maxLevel) const
 {
     vector<size_t> vIndices;
@@ -367,10 +373,11 @@ vector<size_t> Frame::GetFeaturesInArea(const float &x, const float  &y, const f
                             continue;
                 }
 
+                // x, y는 각각 u, v를 의미 => 두 keyPoint간의 거리를 계산한다.
                 const float distx = kpUn.pt.x-x;
                 const float disty = kpUn.pt.y-y;
 
-                if(fabs(distx)<r && fabs(disty)<r)
+                if(fabs(distx)<r && fabs(disty)<r) // fabs() : 인자로 들어온 double타입의 num 절댓값을 반환하는 함수
                     vIndices.push_back(vCell[j]);
             }
         }
@@ -393,10 +400,14 @@ bool Frame::PosInGrid(const cv::KeyPoint &kp, int &posX, int &posY)
 
 
 void Frame::ComputeBoW()
-{
+{   
+    // DBoW2::BowVector mBowVec가 비어있다면
     if(mBowVec.empty())
     {
-        vector<cv::Mat> vCurrentDesc = Converter::toDescriptorVector(mDescriptors);
+        // toDescriptorVector를 통해 mDescriptor를 vDescriptor로 바꿈
+        vector<cv::Mat> vCurrentDesc = Converter::toDescriptorVector(mDescriptors); // cv::Mat mDescriptors : ORB descriptor
+        
+        // [TODO]
         mpORBvocabulary->transform(vCurrentDesc,mBowVec,mFeatVec,4);
     }
 }
@@ -663,16 +674,29 @@ void Frame::ComputeStereoFromRGBD(const cv::Mat &imDepth)
     }
 }
 
+
+/**
+ * @brief stereo depth를 이용하여 카메라로부터 world로 projection 
+ */
 cv::Mat Frame::UnprojectStereo(const int &i)
 {
     const float z = mvDepth[i];
     if(z>0)
-    {
+    {   
+        // vector<cv::KeyPoint> mvKeysUn
+        // KeyPoint (Point2f pt, float size, float angle=-1, float response=0, int octave=0, int class_id=-1)
         const float u = mvKeysUn[i].pt.x;
         const float v = mvKeysUn[i].pt.y;
+
+        // u = fx*x + cx
+        // v = fy*y + cy
         const float x = (u-cx)*z*invfx;
         const float y = (v-cy)*z*invfy;
+
+        // 카메라 기준 x,y,z
         cv::Mat x3Dc = (cv::Mat_<float>(3,1) << x, y, z);
+        
+        // world 기준으로 투영
         return mRwc*x3Dc+mOw;
     }
     else

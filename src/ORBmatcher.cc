@@ -156,17 +156,25 @@ bool ORBmatcher::CheckDistEpipolarLine(const cv::KeyPoint &kp1,const cv::KeyPoin
     return dsqr<3.84*pKF2->mvLevelSigma2[kp2.octave];
 }
 
+
 int ORBmatcher::SearchByBoW(KeyFrame* pKF,Frame &F, vector<MapPoint*> &vpMapPointMatches)
 {
+    // vpMapPointsKF = mvpMapPoints
     const vector<MapPoint*> vpMapPointsKF = pKF->GetMapPointMatches();
 
+    // keypoint 개수만큼 map point vector 초기화
     vpMapPointMatches = vector<MapPoint*>(F.N,static_cast<MapPoint*>(NULL));
 
+    // Keyframe의 feature vector를 vFeeatVecKF로 선언
+    // [TODO] feature vector : 특정 노드에 속하는 keypoint index (논문에서 direct index에 해당?)
     const DBoW2::FeatureVector &vFeatVecKF = pKF->mFeatVec;
 
     int nmatches=0;
 
-    vector<int> rotHist[HISTO_LENGTH];
+    // 크기 30인 vector 배열 생성
+    // [TODO] rotHist가 뭔지?
+    // vector array
+    vector<int> rotHist[HISTO_LENGTH]; // HISTO_LENTH = 30 
     for(int i=0;i<HISTO_LENGTH;i++)
         rotHist[i].reserve(500);
     const float factor = 1.0f/HISTO_LENGTH;
@@ -177,17 +185,22 @@ int ORBmatcher::SearchByBoW(KeyFrame* pKF,Frame &F, vector<MapPoint*> &vpMapPoin
     DBoW2::FeatureVector::const_iterator KFend = vFeatVecKF.end();
     DBoW2::FeatureVector::const_iterator Fend = F.mFeatVec.end();
 
+    // 모든 vector 성분을 본다.
     while(KFit != KFend && Fit != Fend)
     {
+        // 노드 아이디 같다면 비교 진행
         if(KFit->first == Fit->first)
-        {
+        {   
+            // 특정 node에 속하는 keypoint들의 index vector
             const vector<unsigned int> vIndicesKF = KFit->second;
             const vector<unsigned int> vIndicesF = Fit->second;
 
+            // keyframe
             for(size_t iKF=0; iKF<vIndicesKF.size(); iKF++)
             {
                 const unsigned int realIdxKF = vIndicesKF[iKF];
 
+                // 키프레임의 맵포인트
                 MapPoint* pMP = vpMapPointsKF[realIdxKF];
 
                 if(!pMP)
@@ -202,6 +215,7 @@ int ORBmatcher::SearchByBoW(KeyFrame* pKF,Frame &F, vector<MapPoint*> &vpMapPoin
                 int bestIdxF =-1 ;
                 int bestDist2=256;
 
+                // 동일한 노드 아이디에 있는 프레임상의 키포인트 개수만큼 반복
                 for(size_t iF=0; iF<vIndicesF.size(); iF++)
                 {
                     const unsigned int realIdxF = vIndicesF[iF];
@@ -225,23 +239,32 @@ int ORBmatcher::SearchByBoW(KeyFrame* pKF,Frame &F, vector<MapPoint*> &vpMapPoin
                     }
                 }
 
-                if(bestDist1<=TH_LOW)
+                if(bestDist1 <= TH_LOW) // TH_LOW = 30
                 {
-                    if(static_cast<float>(bestDist1)<mfNNratio*static_cast<float>(bestDist2))
+                    // 첫번째 디스크립터 후보의 디스턴스는 두번째 디스크립터 후보의 디스턴스와 꽤 큰 차이를 보여야한다.
+                    if(static_cast<float>(bestDist1) < mfNNratio*static_cast<float>(bestDist2))
                     {
-                        vpMapPointMatches[bestIdxF]=pMP;
+                        vpMapPointMatches[bestIdxF]=pMP; // 가작 작은 디스턴스를 가졌던 키프레임의 맵 포인트 저장
 
                         const cv::KeyPoint &kp = pKF->mvKeysUn[realIdxKF];
+                        
 
+                        // [TODO] FAST 알고리즘 관련된 작업 - rotation invarience를 얻기 위함?
                         if(mbCheckOrientation)
                         {
                             float rot = kp.angle-F.mvKeys[bestIdxF].angle;
                             if(rot<0.0)
                                 rot+=360.0f;
+
+                            // factor 1/30
+                            // bin은 360도를 30개로 나눈 값
                             int bin = round(rot*factor);
                             if(bin==HISTO_LENGTH)
                                 bin=0;
+
+                            // 해당 조건식이 false면 error출력
                             assert(bin>=0 && bin<HISTO_LENGTH);
+
                             rotHist[bin].push_back(bestIdxF);
                         }
                         nmatches++;
@@ -253,9 +276,12 @@ int ORBmatcher::SearchByBoW(KeyFrame* pKF,Frame &F, vector<MapPoint*> &vpMapPoin
             KFit++;
             Fit++;
         }
+
+        // 프레임의 노드 아이디가 더 큰 경우
         else if(KFit->first < Fit->first)
-        {
-            KFit = vFeatVecKF.lower_bound(Fit->first);
+        {   
+            // lower_bound : 같거나 큰 숫자가 몇 번째에서 처음 등장하는지
+            KFit = vFeatVecKF.lower_bound(Fit->first); // 찾으려는 키 값보다 작거나 큰 숫자가 배열에서 몇 번째 처음 등장하는지 찾음
         }
         else
         {
@@ -270,7 +296,9 @@ int ORBmatcher::SearchByBoW(KeyFrame* pKF,Frame &F, vector<MapPoint*> &vpMapPoin
         int ind2=-1;
         int ind3=-1;
 
+        // rotation histogram 상에서 가장 두드러진 3개를 찾음
         ComputeThreeMaxima(rotHist,HISTO_LENGTH,ind1,ind2,ind3);
+
 
         for(int i=0; i<HISTO_LENGTH; i++)
         {
@@ -1345,8 +1373,11 @@ int ORBmatcher::SearchByProjection(Frame &CurrentFrame, const Frame &LastFrame, 
 
     const cv::Mat tlc = Rlw*twc+tlw;
 
-    const bool bForward = tlc.at<float>(2)>CurrentFrame.mb && !bMono;
-    const bool bBackward = -tlc.at<float>(2)>CurrentFrame.mb && !bMono;
+    // 전진과 후진에 따른 구분
+    //? [Q] baseline을 기준 사용?
+    const bool bForward = tlc.at<float>(2) > CurrentFrame.mb && !bMono;
+    const bool bBackward = -tlc.at<float>(2) > CurrentFrame.mb && !bMono;
+
 
     for(int i=0; i<LastFrame.N; i++)
     {
@@ -1377,11 +1408,16 @@ int ORBmatcher::SearchByProjection(Frame &CurrentFrame, const Frame &LastFrame, 
 
                 int nLastOctave = LastFrame.mvKeys[i].octave;
 
+
                 // Search in a window. Size depends on scale
+                // if stereo -> th = 7
+                // radius : pyramid scale에 따른 정보 -> radius가 클수록 더 멀리 포괄적으로 잡아야 featurea가 더 잘 검출됨
+                //? [TODO] th(=7)을 왜 곱할까?
                 float radius = th*CurrentFrame.mvScaleFactors[nLastOctave];
 
                 vector<size_t> vIndices2;
 
+                // GetFeaturesInArea : scale까지 고려하면서 빠르게 feature를 찾는다
                 if(bForward)
                     vIndices2 = CurrentFrame.GetFeaturesInArea(u,v, radius, nLastOctave);
                 else if(bBackward)
@@ -1389,6 +1425,7 @@ int ORBmatcher::SearchByProjection(Frame &CurrentFrame, const Frame &LastFrame, 
                 else
                     vIndices2 = CurrentFrame.GetFeaturesInArea(u,v, radius, nLastOctave-1, nLastOctave+1);
 
+                // ================================================ 22.01.17 ================================================qqqq
                 if(vIndices2.empty())
                     continue;
 
@@ -1398,8 +1435,10 @@ int ORBmatcher::SearchByProjection(Frame &CurrentFrame, const Frame &LastFrame, 
                 int bestIdx2 = -1;
 
                 for(vector<size_t>::const_iterator vit=vIndices2.begin(), vend=vIndices2.end(); vit!=vend; vit++)
-                {
+                {   
+                    // grid에서 뽑은 하나의 keypoint
                     const size_t i2 = *vit;
+                    
                     if(CurrentFrame.mvpMapPoints[i2])
                         if(CurrentFrame.mvpMapPoints[i2]->Observations()>0)
                             continue;
@@ -1450,7 +1489,7 @@ int ORBmatcher::SearchByProjection(Frame &CurrentFrame, const Frame &LastFrame, 
         int ind1=-1;
         int ind2=-1;
         int ind3=-1;
-
+        
         ComputeThreeMaxima(rotHist,HISTO_LENGTH,ind1,ind2,ind3);
 
         for(int i=0; i<HISTO_LENGTH; i++)
@@ -1580,8 +1619,10 @@ int ORBmatcher::SearchByProjection(Frame &CurrentFrame, KeyFrame *pKF, const set
         int ind2=-1;
         int ind3=-1;
 
+        // rotation histogram 상에서 가장 두드러진 3개를 찾음
         ComputeThreeMaxima(rotHist,HISTO_LENGTH,ind1,ind2,ind3);
 
+        // 3개 조건
         for(int i=0; i<HISTO_LENGTH; i++)
         {
             if(i!=ind1 && i!=ind2 && i!=ind3)
@@ -1652,8 +1693,11 @@ int ORBmatcher::DescriptorDistance(const cv::Mat &a, const cv::Mat &b)
     int dist=0;
 
     for(int i=0; i<8; i++, pa++, pb++)
-    {
+    {   
+        // xor 연산
         unsigned  int v = *pa ^ *pb;
+
+        // 바이너리가 몇개인지 세는 코드 -> 다 합치면 디스크럽터 간의 거리
         v = v - ((v >> 1) & 0x55555555);
         v = (v & 0x33333333) + ((v >> 2) & 0x33333333);
         dist += (((v + (v >> 4)) & 0xF0F0F0F) * 0x1010101) >> 24;

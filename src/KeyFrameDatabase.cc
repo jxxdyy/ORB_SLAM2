@@ -68,8 +68,8 @@ void KeyFrameDatabase::erase(KeyFrame* pKF)
 
 void KeyFrameDatabase::clear()
 {
-    mvInvertedFile.clear();
-    mvInvertedFile.resize(mpVoc->size());
+    mvInvertedFile.clear();    // type : std::vector<list<KeyFrame*> > mvInvertedFile;
+    mvInvertedFile.resize(mpVoc->size());   //  mp
 }
 
 
@@ -196,23 +196,37 @@ vector<KeyFrame*> KeyFrameDatabase::DetectLoopCandidates(KeyFrame* pKF, float mi
     return vpLoopCandidates;
 }
 
+
+/**
+ * @brief [흐름을 한번 짚으면서 이해해보자]
+*/
 vector<KeyFrame*> KeyFrameDatabase::DetectRelocalizationCandidates(Frame *F)
 {
     list<KeyFrame*> lKFsSharingWords;
 
     // Search all keyframes that share a word with current frame
+    // 현재 frame과 word를 공유하는 모든 keyframe 검색
     {
         unique_lock<mutex> lock(mMutex);
 
+        // vit : 현재 frame의 mBowVec.begin() ~ mBowVec.end()
+        // BowVector : std::map<WordId, WordValue>
         for(DBoW2::BowVector::const_iterator vit=F->mBowVec.begin(), vend=F->mBowVec.end(); vit != vend; vit++)
-        {
-            list<KeyFrame*> &lKFs =   mvInvertedFile[vit->first];
-
+        {   
+            // std::vector<list<KeyFrame*>> mvInvertedFile
+            // mvInvertedFile[WordID] : WordID를 가지는 모든 keyframe 정보? (list)
+            list<KeyFrame*> &lKFs = mvInvertedFile[vit->first]; // mvInvertedFile[WordID]
+            
+            // 해당 WordID를 갖는 첫번째 keyframe부터 마지막 keyframe까지
             for(list<KeyFrame*>::iterator lit=lKFs.begin(), lend= lKFs.end(); lit!=lend; lit++)
             {
                 KeyFrame* pKFi=*lit;
+                
+                // 해당 Keyframe의 mnRelocQuery가 현재 frame id와 다르다면
                 if(pKFi->mnRelocQuery!=F->mnId)
-                {
+                {   
+                    // 해당 keyframe의 mnRelocWords = 0
+                    // [Q] 여기 흐름 이해 안됨, mnRelocWords를 알아야 할듯, reloc에 사용되는 word 개수인가?
                     pKFi->mnRelocWords=0;
                     pKFi->mnRelocQuery=F->mnId;
                     lKFsSharingWords.push_back(pKFi);
@@ -221,6 +235,8 @@ vector<KeyFrame*> KeyFrameDatabase::DetectRelocalizationCandidates(Frame *F)
             }
         }
     }
+
+    // Word를 공유하는 keyframe이 없다면?
     if(lKFsSharingWords.empty())
         return vector<KeyFrame*>();
 
@@ -228,13 +244,15 @@ vector<KeyFrame*> KeyFrameDatabase::DetectRelocalizationCandidates(Frame *F)
     int maxCommonWords=0;
     for(list<KeyFrame*>::iterator lit=lKFsSharingWords.begin(), lend= lKFsSharingWords.end(); lit!=lend; lit++)
     {
+        // 가장 큰 mnRelocWords 값을 maxCommonWords에 대입
         if((*lit)->mnRelocWords>maxCommonWords)
             maxCommonWords=(*lit)->mnRelocWords;
     }
 
-    int minCommonWords = maxCommonWords*0.8f;
+    // 최소 common 설정
+    int minCommonWords = maxCommonWords*0.8f; // threshold 같음
 
-    list<pair<float,KeyFrame*> > lScoreAndMatch;
+    list<pair<float,KeyFrame*>> lScoreAndMatch;
 
     int nscores=0;
 
@@ -246,47 +264,77 @@ vector<KeyFrame*> KeyFrameDatabase::DetectRelocalizationCandidates(Frame *F)
         if(pKFi->mnRelocWords>minCommonWords)
         {
             nscores++;
+
+            //const ORBVocabulary* mpVoc;
+            // 현재 frame의 mBowVec과 같은 word를 공유하는 keyframe의 mBowVec 간의 score (L1 score)
             float si = mpVoc->score(F->mBowVec,pKFi->mBowVec);
+
+            // 해당 keyframe에 대한 score값 할당
             pKFi->mRelocScore=si;
+
+            // make_pair는 pair와 달리 template으로 되어있어 인자 타입을 명시하지 않아도 됨
+            // lScoreAndMatch에 해당 keyframe과 score값을 pair로 넣어줌
             lScoreAndMatch.push_back(make_pair(si,pKFi));
         }
     }
 
+    // lScoreAndMatch가 비어있다면?
     if(lScoreAndMatch.empty())
         return vector<KeyFrame*>();
+
 
     list<pair<float,KeyFrame*> > lAccScoreAndMatch;
     float bestAccScore = 0;
 
+    // [TODO] 여기 이중 for문 flow 이해 필요
     // Lets now accumulate score by covisibility
-    for(list<pair<float,KeyFrame*> >::iterator it=lScoreAndMatch.begin(), itend=lScoreAndMatch.end(); it!=itend; it++)
-    {
+    for(list<pair<float,KeyFrame*>>::iterator it=lScoreAndMatch.begin(), itend=lScoreAndMatch.end(); it!=itend; it++)
+    {   
+        // keyframe pointer (lScoreAndMatch에 속한 keyframe)
         KeyFrame* pKFi = it->second;
+
+        // covisibility에서 주변 10개만 봄
         vector<KeyFrame*> vpNeighs = pKFi->GetBestCovisibilityKeyFrames(10);
 
+        // pKFi의 score (si) 값
         float bestScore = it->first;
+
+        // score 값을 accScore에 할당
         float accScore = bestScore;
+
         KeyFrame* pBestKF = pKFi;
         for(vector<KeyFrame*>::iterator vit=vpNeighs.begin(), vend=vpNeighs.end(); vit!=vend; vit++)
-        {
+        {   
+            // 이웃 keyframe
             KeyFrame* pKF2 = *vit;
+
+            // 해당 Keyframe의 mnRelocQuery가 현재 frame id와 다르다면
             if(pKF2->mnRelocQuery!=F->mnId)
                 continue;
 
+            // accScore += mRelocScore
             accScore+=pKF2->mRelocScore;
+
+            // 현재 keyframe의 mRelocScore가 bestScore보다 크다면
             if(pKF2->mRelocScore>bestScore)
-            {
+            {   
+                // best matched keyframe
                 pBestKF=pKF2;
+
+                // best socre
                 bestScore = pKF2->mRelocScore;
             }
 
         }
+
         lAccScoreAndMatch.push_back(make_pair(accScore,pBestKF));
         if(accScore>bestAccScore)
+            // cobisibility graph에서 가장 높은 score
             bestAccScore=accScore;
     }
 
     // Return all those keyframes with a score higher than 0.75*bestScore
+    // [Paper] Bags of Words Place Recognition : 점수가 최고 점수의 75%보다 높게 일치하는 모든 keyframe 반환
     float minScoreToRetain = 0.75f*bestAccScore;
     set<KeyFrame*> spAlreadyAddedKF;
     vector<KeyFrame*> vpRelocCandidates;

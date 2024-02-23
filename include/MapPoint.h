@@ -86,7 +86,7 @@ public:
     static long unsigned int nNextId;
     long int mnFirstKFid;
     long int mnFirstFrame;
-    int nObs;
+    int nObs;   // what?
 
     // Variables used by the tracking
     float mTrackProjX;
@@ -118,6 +118,7 @@ protected:
      cv::Mat mWorldPos;
 
      // Keyframes observing the point and associated index in keyframe
+      // map<key, value> : key와 value를 pair 형태로 선언
      std::map<KeyFrame*,size_t> mObservations;
 
      // Mean viewing direction

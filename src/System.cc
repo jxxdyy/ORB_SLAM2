@@ -113,48 +113,66 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
     mpLoopCloser->SetLocalMapper(mpLocalMapper);
 }
 
+
+// ############################################ Tracking Stereo Part ############################################
 cv::Mat System::TrackStereo(const cv::Mat &imLeft, const cv::Mat &imRight, const double &timestamp)
-{
+{   
+    // sensor = stereo가 아닌 경우 error 문구 출력
     if(mSensor!=STEREO)
     {
         cerr << "ERROR: you called TrackStereo but input sensor was not set to STEREO." << endl;
-        exit(-1);
+        exit(-1); // c++ 프로그램 종료
     }   
 
     // Check mode change
     {
+        // unique_lock : lock, unlock을 자동으로 해줌
+        // critical session 변화가 필요할 때 mMutexMode라는 flag로 표현
         unique_lock<mutex> lock(mMutexMode);
+
+        // Localization mode가 활성화 상태라면
         if(mbActivateLocalizationMode)
         {
-            mpLocalMapper->RequestStop();
+            // LocalMapper에게 멈추도록 지시 -> Localization mode가 활성화되면, Local Mapping thread를 중지하라는 메시지 요청과 관련된 flag를 변경한다.
+            mpLocalMapper->RequestStop(); // mpLocalMapper는 LocalMapping class를 pointer로 instanciation -> 포인터로 접근할 수 있다.
 
             // Wait until Local Mapping has effectively stopped
-            while(!mpLocalMapper->isStopped())
+            while(!mpLocalMapper->isStopped()) // LocalMapper가 중지되지 않았다면
             {
                 usleep(1000);
             }
 
+            // Tracking만 동작하도록 설정 -> mbOnlyTracking = true
             mpTracker->InformOnlyTracking(true);
+
+            // flag = false로 초기화
             mbActivateLocalizationMode = false;
         }
+
+        // Localization mode가 활성화 상태가 아니라면
         if(mbDeactivateLocalizationMode)
         {
+            // OnlyTracking 모드 또한 false -> mbOnlyTracking = false
             mpTracker->InformOnlyTracking(false);
-            mpLocalMapper->Release();
-            mbDeactivateLocalizationMode = false;
+            mpLocalMapper->Release();               // 새로운 keyframe을 받기 위해 기존의 keyframe list 삭제
+            mbDeactivateLocalizationMode = false; 
         }
     }
 
-    // Check reset
+    // ================================================ 22.01.09 ================================================
+    // Check reset -> tracking을 수행하기 전, system reset
     {
     unique_lock<mutex> lock(mMutexReset);
+    // mbReset = true 이면 Reset 실행
+    // 어디서 mbReset이 true가 될까? viewer에서 reset 버튼이 눌리면 system::Reset()에서 mbReset = true
     if(mbReset)
-    {
-        mpTracker->Reset();
-        mbReset = false;
+    {   
+        mpTracker->Reset();  // Tracking.cc::Reset() 실행
+        mbReset = false;     // Reset 후 mbReset = false
     }
     }
 
+    // Camera pose
     cv::Mat Tcw = mpTracker->GrabImageStereo(imLeft,imRight,timestamp);
 
     unique_lock<mutex> lock2(mMutexState);

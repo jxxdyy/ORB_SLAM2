@@ -125,6 +125,11 @@ This will create **libORB_SLAM2.so**  at *lib* folder and the executables **mono
 ./Examples/Monocular/mono_euroc Vocabulary/ORBvoc.txt Examples/Monocular/EuRoC.yaml PATH_TO_SEQUENCE/cam0/data Examples/Monocular/EuRoC_TimeStamps/SEQUENCE.txt 
 ```
 
+## VPAir Dataset
+```
+./Examples/Monocular/mono_vpair Vocabulary/ORBvoc.txt Examples/Monocular/VPAir.yaml /data_root/dataset/VPAir
+```
+
 # 5. Stereo Examples
 
 ## KITTI Dataset

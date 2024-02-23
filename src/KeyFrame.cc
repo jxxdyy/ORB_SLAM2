@@ -174,8 +174,13 @@ vector<KeyFrame*> KeyFrame::GetVectorCovisibleKeyFrames()
 vector<KeyFrame*> KeyFrame::GetBestCovisibilityKeyFrames(const int &N)
 {
     unique_lock<mutex> lock(mMutexConnections);
+
+    // std::vector<KeyFrame*> mvpOrderedConnectedKeyFrames : covisibility graph에 속한 keyframe vector
+    // size가 10보다 작으면 그대로 returen
     if((int)mvpOrderedConnectedKeyFrames.size()<N)
         return mvpOrderedConnectedKeyFrames;
+    
+    // size가 10보다 크면 10까지만 return
     else
         return vector<KeyFrame*>(mvpOrderedConnectedKeyFrames.begin(),mvpOrderedConnectedKeyFrames.begin()+N);
 

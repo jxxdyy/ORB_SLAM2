@@ -164,14 +164,21 @@ void Tracking::SetViewer(Viewer *pViewer)
 }
 
 
+// ############################################ Grab Stereo Image Part ############################################
+/**
+ * @brief 이미지를 gray scale로 바꾸고 frame 정보 설정
+ * @return 현재 frame의 camera pose 
+*/ 
 cv::Mat Tracking::GrabImageStereo(const cv::Mat &imRectLeft, const cv::Mat &imRectRight, const double &timestamp)
-{
-    mImGray = imRectLeft;
+{   
+    // [Q] 왜 imGrayleft가 아닌 mimGray라는 이름이 다른 변수에 저장을 하지?
+    mImGray = imRectLeft; // Tracking.h mImGray
     cv::Mat imGrayRight = imRectRight;
 
+    // image가 3-channel color일 경우
     if(mImGray.channels()==3)
     {
-        if(mbRGB)
+        if(mbRGB) // true RGB, false BGR
         {
             cvtColor(mImGray,mImGray,CV_RGB2GRAY);
             cvtColor(imGrayRight,imGrayRight,CV_RGB2GRAY);
@@ -182,6 +189,8 @@ cv::Mat Tracking::GrabImageStereo(const cv::Mat &imRectLeft, const cv::Mat &imRe
             cvtColor(imGrayRight,imGrayRight,CV_BGR2GRAY);
         }
     }
+
+    // image가 4-channel color일 경우
     else if(mImGray.channels()==4)
     {
         if(mbRGB)
@@ -196,10 +205,18 @@ cv::Mat Tracking::GrabImageStereo(const cv::Mat &imRectLeft, const cv::Mat &imRe
         }
     }
 
+    // class Frame::mCurrentFrame;
+    // Frame : extractORB, ComputeBoWM, ComputeStereoMatches, setPose 등 카메라 frame에 대한 대부분의 정보를 담당
+    // currentFrame에 대한 정보를 Frame class 객체 정보로 할당
     mCurrentFrame = Frame(mImGray,imGrayRight,timestamp,mpORBextractorLeft,mpORBextractorRight,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth);
-
+                    // (left gray image, right gray image, timestamp, left ORBextractor, right ORBextractor, intrinsic mat,  )
+    
+    // Tracking 시작
     Track();
 
+    // cv::Mat mTcw : camera pose
+    // clone : deep copy, 값은 같지만 메모리를 따로 할당 
+    // [Q1] 왜 deep copy를 해서 보낼까? -> 포인터라서 주소를 넘기기 때문에 메모리를 따로 햬야함
     return mCurrentFrame.mTcw.clone();
 }
 
@@ -266,35 +283,41 @@ cv::Mat Tracking::GrabImageMonocular(const cv::Mat &im, const double &timestamp)
 
 void Tracking::Track()
 {
+    // 초기 system.cc에서 Reset후 mState = NO_IMAGES_YET = 0
     if(mState==NO_IMAGES_YET)
     {
-        mState = NOT_INITIALIZED;
+        mState = NOT_INITIALIZED; // NOT_INITIALIZED = 1
     }
 
-    mLastProcessedState=mState;
+    mLastProcessedState=mState; // mLastProcessedState = NOT_INITIALIZED
 
     // Get Map Mutex -> Map cannot be changed
     unique_lock<mutex> lock(mpMap->mMutexMapUpdate);
 
     if(mState==NOT_INITIALIZED)
     {
+        // sensor가 stereo camera이거나 RGB-D인 경우 StereoInitialization 수행
         if(mSensor==System::STEREO || mSensor==System::RGBD)
             StereoInitialization();
+        
+        // sensor가 mono camera인 경우 MonoInitialization 수행
         else
             MonocularInitialization();
 
         mpFrameDrawer->Update(this);
 
         if(mState!=OK)
-            return;
+            return; // initialization이 잘 안된 경우 track 종료
     }
+
+    // StereoInitalization을 수행하고 나면 mState = OK(=2)
     else
     {
         // System is initialized. Track Frame.
         bool bOK;
 
         // Initial camera pose estimation using motion model or relocalization (if tracking is lost)
-        if(!mbOnlyTracking)
+        if(!mbOnlyTracking) // [Q] onlytraking이 어떤 상태일까?
         {
             // Local Mapping is activated. This is the normal behaviour, unless
             // you explicitly activate the "only tracking" mode.
@@ -302,19 +325,31 @@ void Tracking::Track()
             if(mState==OK)
             {
                 // Local Mapping might have changed some MapPoints tracked in last frame
+                // TODO 대체를 왜하누?
                 CheckReplacedInLastFrame();
 
+                // cv::Mat mVelocity : motion model 
+                // class Tracking::mnLastRelocFrameId
+                // motion model을 이용 못할 때 or rolocalization이 발생하고 3 frame 이내일 경우
+                // mVelocity.empty() 인 경우는 initialization 바로 이후면 motion model이 없음
+                // [Paper] Initial Pose Estimation From Previous Frame
                 if(mVelocity.empty() || mCurrentFrame.mnId<mnLastRelocFrameId+2)
                 {
+                    // [TODO]
                     bOK = TrackReferenceKeyFrame();
                 }
                 else
-                {
+                {   
+                    // 등속 motion model을 이용하여 카메라 pose estimation
                     bOK = TrackWithMotionModel();
+
+                    //
                     if(!bOK)
                         bOK = TrackReferenceKeyFrame();
                 }
             }
+
+            // mState = OK가 아닐 경우 -> relocalization 필요
             else
             {
                 bOK = Relocalization();
@@ -322,15 +357,14 @@ void Tracking::Track()
         }
         else
         {
-            // Localization Mode: Local Mapping is deactivated
-
+            // Localization Mode: Local Mapping is deactivated -> localization을 해야하므로 local mapping은 끔
             if(mState==LOST)
             {
                 bOK = Relocalization();
             }
             else
             {
-                if(!mbVO)
+                if(!mbVO) // Traking 객체 생성 시 mbVO = false
                 {
                     // In last frame we tracked enough MapPoints in the map
 
@@ -343,6 +377,8 @@ void Tracking::Track()
                         bOK = TrackReferenceKeyFrame();
                     }
                 }
+
+                // mbVO = true
                 else
                 {
                     // In last frame we tracked mainly "visual odometry" points.
@@ -351,8 +387,8 @@ void Tracking::Track()
                     // If relocalization is sucessfull we choose that solution, otherwise we retain
                     // the "visual odometry" solution.
 
-                    bool bOKMM = false;
-                    bool bOKReloc = false;
+                    bool bOKMM = false;     // be ok motion model
+                    bool bOKReloc = false;  // be ok relocalization
                     vector<MapPoint*> vpMPsMM;
                     vector<bool> vbOutMM;
                     cv::Mat TcwMM;
@@ -506,59 +542,94 @@ void Tracking::Track()
 }
 
 
+// ############################################ Stereo Initialization Part ############################################
 void Tracking::StereoInitialization()
 {
+    // N : Number of KeyPoints, Keypoints 수가 500개가 넘을 때 작동
+    // class Frame::mCurrentFrame
     if(mCurrentFrame.N>500)
     {
-        // Set Frame pose to the origin
+        // Set Frame pose to the origin (카메라 초기 pose 설정)
         mCurrentFrame.SetPose(cv::Mat::eye(4,4,CV_32F));
 
-        // Create KeyFrame
+        // Create KeyFrame 
+        // [Q] 우선 현재 frame을 keyframe에 넣고 나중에 keyframe인지 판단하나? keyframe 판단 부분 어디
+        // [A] 첫번째 프레임은 무조건 키프레임
         KeyFrame* pKFini = new KeyFrame(mCurrentFrame,mpMap,mpKeyFrameDB);
 
         // Insert KeyFrame in the map
-        mpMap->AddKeyFrame(pKFini);
+        // mspKeyFrames에 pkFini insert
+        mpMap->AddKeyFrame(pKFini);    // Map* mpMap
 
         // Create MapPoints and asscoiate to KeyFrame
         for(int i=0; i<mCurrentFrame.N;i++)
         {
-            float z = mCurrentFrame.mvDepth[i];
+            float z = mCurrentFrame.mvDepth[i]; // i번째 keypoint의 depth
             if(z>0)
             {
+                // 
                 cv::Mat x3D = mCurrentFrame.UnprojectStereo(i);
+
+                // 
                 MapPoint* pNewMP = new MapPoint(x3D,pKFini,mpMap);
+
+                //  std::map<KeyFrame*,size_t> mObservations
                 pNewMP->AddObservation(pKFini,i);
+
+                // class KeyFrame::mvpMapPoints[i] = pNewMP
                 pKFini->AddMapPoint(pNewMP,i);
+
+                // Discriptor 계산
                 pNewMP->ComputeDistinctiveDescriptors();
+                // ================================================ 22.01.09 ================================================
+                
+                // obsearvation의 normal 및 map point와 카메라 중심으로부터의 거리
                 pNewMP->UpdateNormalAndDepth();
+
+                // std::set<MapPoint*> mspMapPoints에 pNewMP insert
                 mpMap->AddMapPoint(pNewMP);
 
+                // class Frame::mvpMapPoints[i] = pNewMP
                 mCurrentFrame.mvpMapPoints[i]=pNewMP;
             }
         }
-
+        
+        // std::set<MapPoint*> mspMapPoints.size() 출력;
         cout << "New map created with " << mpMap->MapPointsInMap() << " points" << endl;
 
+        // std::list<KeyFrame*> mlNewKeyFrames에 pkF를 push_back 하고 BA abort
         mpLocalMapper->InsertKeyFrame(pKFini);
 
-        mLastFrame = Frame(mCurrentFrame);
-        mnLastKeyFrameId=mCurrentFrame.mnId;
-        mpLastKeyFrame = pKFini;
+        // [TODO] last를 왜 정의할까?
+        mLastFrame = Frame(mCurrentFrame);      // last frame
+        mnLastKeyFrameId=mCurrentFrame.mnId;    // current frame id
+        mpLastKeyFrame = pKFini;         
 
-        mvpLocalKeyFrames.push_back(pKFini);
-        mvpLocalMapPoints=mpMap->GetAllMapPoints();
-        mpReferenceKF = pKFini;
-        mCurrentFrame.mpReferenceKF = pKFini;
+        mvpLocalKeyFrames.push_back(pKFini);    // std::vector<KeyFrame*> mvpLocalKeyFrames
 
+        // mspMapPoints.begin() 부터 mspMapPoints.end()까지 모두 mvpLocalMapPoints에 대입
+        // initialize 단계이기 때문에 모든 MapPoints 가져와도 됨
+        mvpLocalMapPoints=mpMap->GetAllMapPoints(); // std::vector<MapPoint*> mvpLocalMapPoints;
+
+        // 현재 frame와 reference frame과의 match를 계산할 때 사용
+        mpReferenceKF = pKFini;                 // class Tracking::mpReferenceKF
+        mCurrentFrame.mpReferenceKF = pKFini;   // class Frame::mpReferenceKF
+
+        // mvpReferenceMapPoints에 모든 mspMapPoints 대입
+        // reference map point를 현재 local map point로 설정
         mpMap->SetReferenceMapPoints(mvpLocalMapPoints);
-
+        
+        // mvpKeryFrameOrigins에 keyframe 대입
         mpMap->mvpKeyFrameOrigins.push_back(pKFini);
-
+        
+        // class MapDrawer::mCameraPose에 현재 frame의 camera pose 대입
         mpMapDrawer->SetCurrentCameraPose(mCurrentFrame.mTcw);
 
-        mState=OK;
+        // Initialization 성공 & pose 추정
+        mState=OK;  // mState = 2
     }
 }
+
 
 void Tracking::MonocularInitialization()
 {
@@ -736,24 +807,31 @@ void Tracking::CreateInitialMapMonocular()
     mState=OK;
 }
 
+
+// [TODO]
 void Tracking::CheckReplacedInLastFrame()
 {
     for(int i =0; i<mLastFrame.N; i++)
-    {
+    {   
+        // MapPoints associated to keypoints
+        // LastFrame의 MapPoints
         MapPoint* pMP = mLastFrame.mvpMapPoints[i];
 
         if(pMP)
         {
-            MapPoint* pRep = pMP->GetReplaced();
+            MapPoint* pRep = pMP->GetReplaced();    // pRep = MapPoint* mpReplaced
             if(pRep)
             {
-                mLastFrame.mvpMapPoints[i] = pRep;
+                mLastFrame.mvpMapPoints[i] = pRep;  // LastFrame의 MapPoints를 mpReplaced로 대체
             }
         }
     }
 }
 
 
+/**
+ * @brief [TODO]
+*/
 bool Tracking::TrackReferenceKeyFrame()
 {
     // Compute Bag of Words vector
@@ -761,109 +839,169 @@ bool Tracking::TrackReferenceKeyFrame()
 
     // We perform first an ORB matching with the reference keyframe
     // If enough matches are found we setup a PnP solver
-    ORBmatcher matcher(0.7,true);
+    ORBmatcher matcher(0.7,true); // (nnratio, checkOri)
     vector<MapPoint*> vpMapPointMatches;
-
+    
+    // [TODO] Search BOW 
     int nmatches = matcher.SearchByBoW(mpReferenceKF,mCurrentFrame,vpMapPointMatches);
-
+    
+    // matching 되는 것이 15개보다 적으면 false
+    // covisibility edge 15개?
     if(nmatches<15)
         return false;
 
+
     mCurrentFrame.mvpMapPoints = vpMapPointMatches;
+    // LastFrame의 Tcw로 pose 설정
     mCurrentFrame.SetPose(mLastFrame.mTcw);
 
+    // optimize -> [Q] 왜함?
+    // 이전거 그대로 대입해서 optimizatioin 적용해서 pose얻음
     Optimizer::PoseOptimization(&mCurrentFrame);
 
     // Discard outliers
-    int nmatchesMap = 0;
-    for(int i =0; i<mCurrentFrame.N; i++)
+    int nmatchesMap = 0; // [Q] 무슨 변수일까요?
+    for(int i =0; i<mCurrentFrame.N; i++) // keypoint 개수만큼
     {
+        // NULL일 경우 no association이므로 건너뛰고 association이 있을 경우 outlier 판단부로 넘김
         if(mCurrentFrame.mvpMapPoints[i])
-        {
+        {   
+            // mvbOutlier : i번째에서 outlier와의 연관성을 판단하는 flag
+            // [Q] bool값이 어디서 어떻게 판단된거지?
             if(mCurrentFrame.mvbOutlier[i])
             {
                 MapPoint* pMP = mCurrentFrame.mvpMapPoints[i];
-
-                mCurrentFrame.mvpMapPoints[i]=static_cast<MapPoint*>(NULL);
+                
+                // NULL값으로 대체
+                mCurrentFrame.mvpMapPoints[i]=static_cast<MapPoint*>(NULL); // static_cast : 포인터를 형변환할 때 오류를 체크해줌
+                
+                // 위에서 처리했으므로 outlier에 대한 bool 타입 false로 변경
                 mCurrentFrame.mvbOutlier[i]=false;
+
+                // [TODO][Q] mbTrackInview -> 얘 뭐하는 flag?
                 pMP->mbTrackInView = false;
                 pMP->mnLastFrameSeen = mCurrentFrame.mnId;
+
+                // nmatches(매칭됐던 것)에서 outlier를 없앴으니 matching됐던 개수 하나 줄임 
+                // 왜 정의함? 안쓸건데...
                 nmatches--;
             }
+
+            // 
             else if(mCurrentFrame.mvpMapPoints[i]->Observations()>0)
                 nmatchesMap++;
         }
     }
-
+    
+    // nmatchesMap이 10개 이상이면 true 출력
     return nmatchesMap>=10;
+    // ================================================ 22.01.12 ================================================
 }
 
-void Tracking::UpdateLastFrame()
-{
-    // Update pose according to reference keyframe
-    KeyFrame* pRef = mLastFrame.mpReferenceKF;
-    cv::Mat Tlr = mlRelativeFramePoses.back();
 
+/** [check]
+ * @brief Lastframe을 update하는 과정
+*/
+void Tracking::UpdateLastFrame()
+{   
+    // Update pose according to reference keyframe
+    // lastframe 기준에 해당하는 reference keyframe
+    KeyFrame* pRef = mLastFrame.mpReferenceKF;
+
+    // list<cv::Mat> mRelativeFrameposes의 마지막 원소
+    cv::Mat Tlr = mlRelativeFramePoses.back();
+    
+    // ReferenceKF의 pose에 relative pose를 곱하여 LastFrame의 pose를 결정
     mLastFrame.SetPose(Tlr*pRef->GetPose());
 
+    // lastframe이 keyframe으로 선정된 경우
     if(mnLastKeyFrameId==mLastFrame.mnId || mSensor==System::MONOCULAR || !mbOnlyTracking)
         return;
-
+    
     // Create "visual odometry" MapPoints
     // We sort points according to their measured depth by the stereo/RGB-D sensor
-    vector<pair<float,int> > vDepthIdx;
-    vDepthIdx.reserve(mLastFrame.N);
+    vector<pair<float,int> > vDepthIdx; // pair 자료형의 원소를 가지는 vector 선언
+    vDepthIdx.reserve(mLastFrame.N);    // keypoint 개수만큼 크기 할당
+
+
     for(int i=0; i<mLastFrame.N;i++)
     {
         float z = mLastFrame.mvDepth[i];
+        // z(depth)가 양수인 경우 해당 index와 depth를 vDepthIdx에 pair로 넣어줌 
         if(z>0)
         {
             vDepthIdx.push_back(make_pair(z,i));
         }
     }
-
+    
+    // vDepth
     if(vDepthIdx.empty())
         return;
 
+    // depth를 오름차순으로 sort
     sort(vDepthIdx.begin(),vDepthIdx.end());
 
     // We insert all close points (depth<mThDepth)
     // If less than 100 close points, we insert the 100 closest ones.
-    int nPoints = 0;
+    
+    int nPoints = 0; // closest points 개수
+
     for(size_t j=0; j<vDepthIdx.size();j++)
     {
-        int i = vDepthIdx[j].second;
-
+        int i = vDepthIdx[j].second; // index
+        
+        // 새로운 map point를 생성해야 하는지를 판단하는 flag
         bool bCreateNew = false;
 
         MapPoint* pMP = mLastFrame.mvpMapPoints[i];
+        // 해당 map point가 없을 경우
         if(!pMP)
             bCreateNew = true;
+
+        // [Q] map point는 있는데 observation이 없는 경우? -> culling으로 keyframe이 사라쟜을 경우 
         else if(pMP->Observations()<1)
         {
             bCreateNew = true;
         }
-
+        
+        // 새로운 map point를 생성해야 할 경우
         if(bCreateNew)
         {
+            // pixel to world 실행
             cv::Mat x3D = mLastFrame.UnprojectStereo(i);
+    
             MapPoint* pNewMP = new MapPoint(x3D,mpMap,&mLastFrame,i);
 
             mLastFrame.mvpMapPoints[i]=pNewMP;
 
+            // list<MapPoint*> mlpTemporalPoints;
+            /** 
+             * ? [Q] TemporalPoints를 왜 쓰는걸까? 
+             * ? frame map point는 data association에서만 쓰고 local mapping에서는 key frame의 map point만 mapping
+             * ? 하기 때문에 필요없으니 traking이 끝난 후 데이터를 지운다.
+             */ 
             mlpTemporalPoints.push_back(pNewMP);
             nPoints++;
         }
+
+        // bCreateNew = false인 경우 바로 count
         else
         {
             nPoints++;
         }
 
+        // depth가 theshold depth보다 크고 points가 100개 초과이면 break
+        // 앞 조건이 메인이고 최소 100개 이상
         if(vDepthIdx[j].first>mThDepth && nPoints>100)
             break;
     }
 }
 
+
+/** ############################################ Motion Model ############################################
+ * @brief Use a constant velocity motion model to predict the camera pose and perform a guided search of 
+ *        the map points observed in the last frame
+*/
 bool Tracking::TrackWithMotionModel()
 {
     ORBmatcher matcher(0.9,true);
@@ -872,11 +1010,15 @@ bool Tracking::TrackWithMotionModel()
     // Create "visual odometry" points if in Localization Mode
     UpdateLastFrame();
 
+    // motion model을 이용하여 현재 frame의 pose set
     mCurrentFrame.SetPose(mVelocity*mLastFrame.mTcw);
 
+    // fill:어떤 연속성을 가진 자료구조(vector, array 등)의 시작점부터 연속된 범위를 어떤 값이나 객체로 모두 지정하고 싶을 때 사용
+    // 우선 모든 map point를 NULL로 할당
     fill(mCurrentFrame.mvpMapPoints.begin(),mCurrentFrame.mvpMapPoints.end(),static_cast<MapPoint*>(NULL));
 
     // Project points seen in previous frame
+    // [TODO] SearchByProjection
     int th;
     if(mSensor!=System::STEREO)
         th=15;
@@ -885,6 +1027,8 @@ bool Tracking::TrackWithMotionModel()
     int nmatches = matcher.SearchByProjection(mCurrentFrame,mLastFrame,th,mSensor==System::MONOCULAR);
 
     // If few matches, uses a wider window search
+    /* 만약 일치 개수가 충분하지 않을 경우 마지막 frame에서 해당 위치 주변의 map point를 더 광범위하게 탐색 후 발견된 correspondence를
+       이용하여 최적화 */
     if(nmatches<20)
     {
         fill(mCurrentFrame.mvpMapPoints.begin(),mCurrentFrame.mvpMapPoints.end(),static_cast<MapPoint*>(NULL));
@@ -899,18 +1043,27 @@ bool Tracking::TrackWithMotionModel()
 
     // Discard outliers
     int nmatchesMap = 0;
-    for(int i =0; i<mCurrentFrame.N; i++)
-    {
+    for(int i =0; i<mCurrentFrame.N; i++) // keypoint 개수만큼
+    {   
+        // NULL일 경우 no association이므로 건너뛰고 association이 있을 경우 outlier 판단부로 넘김
         if(mCurrentFrame.mvpMapPoints[i])
         {
+            // mvbOutlier : i번째에서 outlier와의 연관성을 판단하는 flag
             if(mCurrentFrame.mvbOutlier[i])
             {
                 MapPoint* pMP = mCurrentFrame.mvpMapPoints[i];
-
+                
+                // NULL값으로 대체
                 mCurrentFrame.mvpMapPoints[i]=static_cast<MapPoint*>(NULL);
+                
+                // 위에서 처리했으므로 outlier에 대한 bool 타입 false로 변경
                 mCurrentFrame.mvbOutlier[i]=false;
+
+                //? [TODO] 무슨 변수인지 확인 필요
                 pMP->mbTrackInView = false;
                 pMP->mnLastFrameSeen = mCurrentFrame.mnId;
+
+                // nmatches(매칭됐던 것)에서 outlier를 없앴으니 matching됐던 개수 하나 줄임 
                 nmatches--;
             }
             else if(mCurrentFrame.mvpMapPoints[i]->Observations()>0)
@@ -1345,11 +1498,14 @@ bool Tracking::Relocalization()
 
     // Relocalization is performed when tracking is lost
     // Track Lost: Query KeyFrame Database for keyframe candidates for relocalisation
+    // Keyframe database에서 relocalization keyframe 후보를 찾음
     vector<KeyFrame*> vpCandidateKFs = mpKeyFrameDB->DetectRelocalizationCandidates(&mCurrentFrame);
 
+    // 후보가 없으면 종료
     if(vpCandidateKFs.empty())
         return false;
 
+    // 후보 keyframe 개수
     const int nKFs = vpCandidateKFs.size();
 
     // We perform first an ORB matching with each candidate
@@ -1501,10 +1657,13 @@ bool Tracking::Relocalization()
 
 }
 
+// ############################################ Tracking Reset ############################################
 void Tracking::Reset()
 {
 
     cout << "System Reseting" << endl;
+    // NULL도 false, 처음에 false로 해놓음
+    // System.cc에 bUseViewer
     if(mpViewer)
     {
         mpViewer->RequestStop();
@@ -1530,24 +1689,29 @@ void Tracking::Reset()
     // Clear Map (this erase MapPoints and KeyFrames)
     mpMap->clear();
 
+    // Reset에 따른 next index 초기화
     KeyFrame::nNextId = 0;
     Frame::nNextId = 0;
-    mState = NO_IMAGES_YET;
+    // [Q] 정확히 어떤 상태라고 해야할까?
+    mState = NO_IMAGES_YET;  // enum eTrackingState :: NO_IMAGES_YET = 0
 
+    // 동적으로 할당된 mpInitializer를 해제
     if(mpInitializer)
     {
         delete mpInitializer;
         mpInitializer = static_cast<Initializer*>(NULL);
     }
 
-    mlRelativeFramePoses.clear();
-    mlpReferences.clear();
-    mlFrameTimes.clear();
-    mlbLost.clear();
+    mlRelativeFramePoses.clear();   // std::list<cv::Mat> mlRelativeFramePoses
+    mlpReferences.clear();          // std::list<KeyFrame*> mlpReferences         
+    mlFrameTimes.clear();           // std::list<double> mlFrameTimes;
+    mlbLost.clear();                // std::list<bool> mlbLost
 
     if(mpViewer)
-        mpViewer->Release();
+        mpViewer->Release();    // Viewer::mbStopped = false;
 }
+
+
 
 void Tracking::ChangeCalibration(const string &strSettingPath)
 {

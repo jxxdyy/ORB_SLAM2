@@ -33,7 +33,7 @@ void Map::AddKeyFrame(KeyFrame *pKF)
 {
     unique_lock<mutex> lock(mMutexMap);
     mspKeyFrames.insert(pKF);
-    if(pKF->mnId>mnMaxKFid)
+    if(pKF->mnId>mnMaxKFid)  
         mnMaxKFid=pKF->mnId;
 }
 
@@ -117,6 +117,8 @@ long unsigned int Map::GetMaxKFid()
 
 void Map::clear()
 {
+    // 왜 set을 쓸까? : sort를 해줌 
+    // 벡터는 중간에 값을 삽입, 삭제 -> 리소스 낭비
     for(set<MapPoint*>::iterator sit=mspMapPoints.begin(), send=mspMapPoints.end(); sit!=send; sit++)
         delete *sit;
 

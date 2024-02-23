@@ -1128,6 +1128,7 @@ void TemplatedVocabulary<TDescriptor,F>::transform(
   const std::vector<TDescriptor>& features,
   BowVector &v, FeatureVector &fv, int levelsup) const
 {
+  // BowVector와 FeatureVector의 size를 0으로 만들어줌
   v.clear();
   fv.clear();
   
@@ -1137,6 +1138,7 @@ void TemplatedVocabulary<TDescriptor,F>::transform(
   }
   
   // normalize 
+  // enum 변수 LNorm : L1, L2
   LNorm norm;
   bool must = m_scoring_object->mustNormalize(norm);
   
